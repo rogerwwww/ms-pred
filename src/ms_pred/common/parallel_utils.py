@@ -1,6 +1,7 @@
 import logging
 from tqdm import tqdm
-
+import multiprocess.context as ctx
+ctx._force_start_method('spawn')
 
 def simple_parallel(
     input_list, function, max_cpu=16, timeout=4000, max_retries=3, use_ray: bool = False
@@ -36,6 +37,25 @@ def simple_parallel(
     pool.join()
     return results
 
+# # If parallel with default multi-processing, this class is needed to pass the function call object
+# class batch_func:
+#     def __init__(self, func, args=None, kwargs=None):
+#         self.func = func
+#         if args is not None:
+#             self.args = args
+#         else:
+#             self.args = []
+#         if kwargs is not None:
+#             self.kwargs = kwargs
+#         else:
+#             self.kwargs = {}
+#
+#     def __call__(self, list_inputs):
+#         outputs = []
+#         for i in list_inputs:
+#             outputs.append(self.func(i, *self.args, **self.kwargs))
+#         return outputs
+
 
 def chunked_parallel(
     input_list,
@@ -66,6 +86,8 @@ def chunked_parallel(
         return outputs
 
     list_len = len(input_list)
+    if list_len == 0:
+        raise ValueError('Empty list to process!')
     num_chunks = min(list_len, chunks)
     step_size = len(input_list) // num_chunks
 
@@ -73,14 +95,27 @@ def chunked_parallel(
         input_list[i : i + step_size] for i in range(0, len(input_list), step_size)
     ]
 
-    list_outputs = simple_parallel(
-        chunked_list,
-        batch_func,
-        max_cpu=max_cpu,
-        timeout=timeout,
-        max_retries=max_retries,
-        use_ray=use_ray,
-    )
+    from pathos import multiprocessing as mp
+    cpus = min(mp.cpu_count(), max_cpu)
+    with mp.ProcessPool(processes=cpus) as pool:
+        list_outputs = list(tqdm(pool.imap(batch_func, chunked_list), total=num_chunks))
+
+    # import multiprocessing as mp
+    # cpus = min(mp.cpu_count(), max_cpu)
+    # with mp.get_context("spawn").Pool(cpus) as pool:
+    #     func_obj = batch_func(function, args, kwargs)
+    #     list_outputs = list(tqdm(pool.imap(func_obj, chunked_list), total=num_chunks))
+
+    # # Parallel without tqdm
+    # list_outputs = simple_parallel(
+    #     chunked_list,
+    #     batch_func,
+    #     max_cpu=max_cpu,
+    #     timeout=timeout,
+    #     max_retries=max_retries,
+    #     use_ray=use_ray,
+    # )
+
     # Unroll
     full_output = [j for i in list_outputs for j in i]
 
