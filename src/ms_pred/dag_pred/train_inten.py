@@ -77,6 +77,7 @@ def add_frag_train_args(parser):
     parser.add_argument("--inject-early", default=False, action="store_true")
     parser.add_argument("--binned-targs", default=False, action="store_true")
     parser.add_argument("--embed-adduct", default=False, action="store_true")
+    parser.add_argument("--embed-collision", default=False, action="store_true")
     parser.add_argument("--encode-forms", default=False, action="store_true")
     parser.add_argument("--add-hs", default=False, action="store_true")
 
@@ -95,7 +96,7 @@ def train_model():
 
     save_dir = kwargs["save_dir"]
     common.setup_logger(save_dir, log_name="dag_inten_train.log", debug=kwargs["debug"])
-    pl.utilities.seed.seed_everything(kwargs.get("seed"))
+    pl.seed_everything(kwargs.get("seed"))
 
     # Dump args
     yaml_args = yaml.dump(kwargs)
@@ -119,7 +120,7 @@ def train_model():
     spec_names = df["spec"].values
     if kwargs["debug_overfit"]:
         train_inds, val_inds, test_inds = common.get_splits(
-            spec_names, split_file, val_frac=0
+            spec_names, split_file
         )
         train_inds = train_inds[:1000]
     else:
@@ -175,27 +176,33 @@ def train_model():
     collate_fn = train_dataset.get_collate_fn()
     train_loader = DataLoader(
         train_dataset,
-        num_workers=min(kwargs["num_workers"], kwargs["batch_size"]),
+        num_workers=num_workers,
         collate_fn=collate_fn,
         shuffle=True,
         batch_size=kwargs["batch_size"],
         persistent_workers=persistent_workers,
+        pin_memory=kwargs["gpu"],
+        multiprocessing_context='spawn',
     )
     val_loader = DataLoader(
         val_dataset,
-        num_workers=min(kwargs["num_workers"], kwargs["batch_size"]),
+        num_workers=num_workers,
         collate_fn=collate_fn,
         shuffle=False,
         batch_size=kwargs["batch_size"],
         persistent_workers=persistent_workers,
+        pin_memory=kwargs["gpu"],
+        multiprocessing_context='spawn',
     )
     test_loader = DataLoader(
         test_dataset,
-        num_workers=min(kwargs["num_workers"], kwargs["batch_size"]),
+        num_workers=num_workers,
         collate_fn=collate_fn,
         shuffle=False,
         batch_size=kwargs["batch_size"],
         persistent_workers=persistent_workers,
+        pin_memory=kwargs["gpu"],
+        multiprocessing_context='spawn',
     )
 
     # Define model
@@ -217,6 +224,7 @@ def train_model():
         root_encode=kwargs["root_encode"],
         inject_early=kwargs["inject_early"],
         embed_adduct=kwargs["embed_adduct"],
+        embed_collision=kwargs["embed_collision"],
         binned_targs=binned_targs,
         encode_forms=kwargs["encode_forms"],
         add_hs=add_hs,
@@ -252,7 +260,7 @@ def train_model():
     trainer = pl.Trainer(
         logger=[tb_logger, console_logger],
         accelerator="gpu" if kwargs["gpu"] else "cpu",
-        gpus=1 if kwargs["gpu"] else 0,
+        devices=1 if kwargs["gpu"] else 0,
         callbacks=callbacks,
         gradient_clip_val=5,
         min_epochs=kwargs["min_epochs"],
